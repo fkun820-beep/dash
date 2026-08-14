@@ -32,86 +32,11 @@ st.markdown("""
 
 st.markdown('<div class="main-header"><h1>📈 Börsenübersicht</h1><p>Tägliche Aktualisierung aller wichtigen Kennzahlen</p></div>', unsafe_allow_html=True)
 
-# ISIN zu Yahoo Ticker Konvertierung
-@st.cache_data(ttl=3600)
-def isin_to_ticker(isin):
-    """Konvertiert ISIN zu Yahoo Finance Ticker."""
-    try:
-        url = f"https://query1.finance.yahoo.com/v1/finance/search?q={isin}&quotesCount=5&newsCount=0"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        response = requests.get(url, headers=headers, timeout=10)
-        data = response.json()
-        if data.get('quotes'):
-            return data['quotes'][0]['symbol']
-    except:
-        pass
-    return None
-
-# Bekannte ISIN-Zuordnungen
-KNOWN_ISINS = {
-    "US0378331005": "AAPL",
-    "US5949181045": "MSFT",
-    "US02079K3059": "GOOGL",
-    "US0231351067": "AMZN",
-    "US88160R1014": "TSLA",
-    "DE0008469008": "SIE.DE",
-    "DE0007164600": "SAP.DE",
-    "DE0008404005": "ALV.DE",
-    "IE00B3RBWM25": "VWRL.AS",
-    "IE00B4L5Y983": "IWDA.AS",
-    "DE000A1JXU90": "EQQQ.DE",
-    "DE000ETFL508": "VUSA.DE",
-    "US78462F1030": "SPY",
-    "US92826C8394": "VTI",
-}
-
-# Ticker zu ISIN Mapping
-TICKER_TO_ISIN = {v: k for k, v in KNOWN_ISINS.items()}
-
-# Globale Top-Performer abrufen
-@st.cache_data(ttl=3600)
-def get_global_top_performers(limit=15):
-    """Holt die globalen Top-Performer aus Yahoo Finance."""
-    try:
-        # Yahoo Finance Screener API für Top-Performer
-        url = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved"
-        params = {
-            "scrIds": "top_mutual_funds",  # Top Fonds
-            "count": limit,
-            "quoteType": "ETF"
-        }
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        
-        response = requests.get(url, params=params, headers=headers, timeout=10)
-        data = response.json()
-        
-        if data.get('finance', {}).get('result'):
-            quotes = data['finance']['result'][0].get('quotes', [])
-            return quotes
-    except:
-        pass
-    
-    # Fallback: Bekannte Top-ETFs und Fonds
-    fallback_tickers = [
-        "SPY", "IVV", "VTI", "VOO", "QQQ",
-        "VUG", "VGT", "XLK", "SMH", "SOXX",
-        "ARKK", "ICLN", "TAN", "URA", "XLE",
-        "XLF", "XLV", "XLY", "XLP", "XLI"
-    ]
-    return fallback_tickers
-
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Einstellungen")
     
-    input_mode = st.radio(
-        "Eingabemodus:",
-        ["Ticker-Symbole", "ISIN-Nummern"],
-        help="Wähle zwischen Yahoo-Ticker-Symbolen oder ISIN-Nummern"
-    )
-    
-    if input_mode == "Ticker-Symbole":
-        default_input = """AAPL
+    default_input = """AAPL
 MSFT
 GOOGL
 AMZN
@@ -130,21 +55,8 @@ BTC-USD
 ETH-USD
 GC=F
 CL=F"""
-        st.info("💡 Tipp: Für deutsche Aktien .DE anhängen")
-    else:
-        default_input = """US0378331005
-US5949181045
-US02079K3059
-US0231351067
-US88160R1014
-DE0008469008
-DE0007164600
-DE0008404005
-IE00B3RBWM25
-IE00B4L5Y983
-DE000A1JXU90
-DE000ETFL508"""
-        st.info("💡 ISIN-Nummern werden in Yahoo-Ticker umgewandelt")
+    
+    st.info("💡 Tipp: Für deutsche Aktien .DE anhängen")
     
     user_input = st.text_area(
         "Wertpapiere (eine pro Zeile):",
@@ -163,66 +75,38 @@ DE000ETFL508"""
     st.subheader("📊 Anzeigeoptionen")
     show_charts = st.checkbox("Charts anzeigen", value=False)
     show_ranking = st.checkbox("Performance-Ranking", value=True)
-    show_top15 = st.checkbox("Globale Top 15 anzeigen", value=True)
-    show_debug = st.checkbox("Debug-Informationen", value=False)
+    show_top_performers = st.checkbox("Top Performer anzeigen", value=True)
     
     st.divider()
     st.caption(f"🕐 Letzte Aktualisierung: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
 
-# ISIN und Ticker Mapping
-isin_ticker_map = {}
-ticker_isin_map = {}
-
-if input_mode == "ISIN-Nummern":
-    tickers = []
-    conversion_log = []
-    
-    with st.spinner("Konvertiere ISIN zu Ticker..."):
-        for isin in input_list:
-            isin = isin.strip().upper()
-            
-            if isin in KNOWN_ISINS:
-                ticker = KNOWN_ISINS[isin]
-                tickers.append(ticker)
-                isin_ticker_map[ticker] = isin
-                ticker_isin_map[ticker] = isin
-                conversion_log.append(f"✅ {isin} → {ticker} (bekannt)")
-            else:
-                ticker = isin_to_ticker(isin)
-                if ticker:
-                    tickers.append(ticker)
-                    isin_ticker_map[ticker] = isin
-                    ticker_isin_map[ticker] = isin
-                    conversion_log.append(f"✅ {isin} → {ticker}")
-                else:
-                    tickers.append(isin)
-                    isin_ticker_map[isin] = isin
-                    ticker_isin_map[isin] = isin
-                    conversion_log.append(f"⚠️ {isin} → nicht konvertiert, versuche direkt")
-else:
-    tickers = input_list
-    for ticker in tickers:
-        if ticker in TICKER_TO_ISIN:
-            ticker_isin_map[ticker] = TICKER_TO_ISIN[ticker]
-            isin_ticker_map[ticker] = ticker
-        else:
-            ticker_isin_map[ticker] = ""
-            isin_ticker_map[ticker] = ticker
-
-# Debug-Anzeige
-if show_debug:
-    st.subheader("🔍 Debug-Informationen")
-    if input_mode == "ISIN-Nummern":
-        for log in conversion_log:
-            st.text(log)
-    else:
-        for ticker in tickers:
-            isin = ticker_isin_map.get(ticker, "Nicht gefunden")
-            st.text(f"{ticker} → ISIN: {isin}")
+# Feste Top-Performer-Liste (Wertzuwachs >40% in 1 Jahr)
+TOP_PERFORMERS = [
+    "NVDA",   # NVIDIA
+    "MSTR",   # MicroStrategy
+    "PLTR",   # Palantir
+    "COIN",   # Coinbase
+    "SMCI",   # Super Micro Computer
+    "AMD",    # Advanced Micro Devices
+    "AVGO",   # Broadcom
+    "TSLA",   # Tesla
+    "META",   # Meta Platforms
+    "CRWD",   # CrowdStrike
+    "HOOD",   # Robinhood
+    "APP",    # AppLovin
+    "VRT",    # Vertiv
+    "ARM",    # Arm Holdings
+    "LLY",    # Eli Lilly
+    "DDOG",   # Datadog
+    "NET",    # Cloudflare
+    "SHOP",   # Shopify
+    "UBER",   # Uber
+    "ANET",   # Arista Networks
+]
 
 # Daten laden
 @st.cache_data(ttl=1800)
-def load_stock_data(tickers_list, ticker_isin_dict):
+def load_stock_data(tickers_list):
     data = []
     
     for ticker in tickers_list:
@@ -246,21 +130,9 @@ def load_stock_data(tickers_list, ticker_isin_dict):
                 
                 high_low_diff = ((high_5y - low_5y) / low_5y) * 100 if low_5y > 0 else None
                 
-                isin = ticker_isin_dict.get(ticker, "")
-                
-                # Fallback: Versuche ISIN von Yahoo zu bekommen
-                if not isin:
-                    try:
-                        info = stock.info
-                        if info and 'isin' in info:
-                            isin = info['isin']
-                    except:
-                        pass
-                
                 data.append({
-                    "ISIN": isin,
-                    "Name": stock.info.get('longName', ticker)[:40] if stock.info else ticker,
                     "Ticker": ticker,
+                    "Name": stock.info.get('longName', ticker)[:40] if stock.info else ticker,
                     "1 Woche %": round(change_1w, 2) if change_1w is not None else None,
                     "1 Monat %": round(change_1mo, 2) if change_1mo is not None else None,
                     "1 Jahr %": round(change_1y, 2) if change_1y is not None else None,
@@ -274,11 +146,9 @@ def load_stock_data(tickers_list, ticker_isin_dict):
                 raise ValueError(f"Keine Daten für {ticker}")
                 
         except Exception as e:
-            isin = ticker_isin_dict.get(ticker, "")
             data.append({
-                "ISIN": isin,
-                "Name": f"❌ {str(e)[:30]}",
                 "Ticker": ticker,
+                "Name": f"❌ {str(e)[:30]}",
                 "1 Woche %": None,
                 "1 Monat %": None,
                 "1 Jahr %": None,
@@ -291,61 +161,10 @@ def load_stock_data(tickers_list, ticker_isin_dict):
     
     return pd.DataFrame(data)
 
-# Globale Top-Performer laden
-@st.cache_data(ttl=3600)
-def load_global_top_performers():
-    """Lädt die globalen Top-Performer mit Performance-Daten."""
-    top_tickers = get_global_top_performers(15)
-    
-    data = []
-    for ticker in top_tickers:
-        try:
-            stock = yf.Ticker(ticker)
-            hist_1y = stock.history(period="1y")
-            
-            if len(hist_1y) > 1:
-                current_price = hist_1y['Close'].iloc[-1]
-                change_1y = (current_price / hist_1y['Close'].iloc[0] - 1) * 100
-                
-                # Weitere Perioden
-                hist_1w = stock.history(period="5d")
-                hist_1mo = stock.history(period="1mo")
-                hist_5y = stock.history(period="5y")
-                
-                change_1w = (current_price / hist_1w['Close'].iloc[0] - 1) * 100 if len(hist_1w) > 1 else None
-                change_1mo = (current_price / hist_1mo['Close'].iloc[0] - 1) * 100 if len(hist_1mo) > 1 else None
-                change_5y = (current_price / hist_5y['Close'].iloc[0] - 1) * 100 if len(hist_5y) > 1 else None
-                
-                isin = ""
-                try:
-                    info = stock.info
-                    if info and 'isin' in info:
-                        isin = info['isin']
-                except:
-                    pass
-                
-                data.append({
-                    "ISIN": isin,
-                    "Name": stock.info.get('longName', ticker)[:40] if stock.info else ticker,
-                    "Ticker": ticker,
-                    "1 Woche %": round(change_1w, 2) if change_1w is not None else None,
-                    "1 Monat %": round(change_1mo, 2) if change_1mo is not None else None,
-                    "1 Jahr %": round(change_1y, 2),
-                    "5 Jahre %": round(change_5y, 2) if change_5y is not None else None,
-                    "Preis": round(current_price, 2)
-                })
-        except:
-            continue
-    
-    df = pd.DataFrame(data)
-    if not df.empty:
-        df = df.nlargest(15, '1 Jahr %')
-    return df
-
 # Hauptbereich
 col1, col2, col3 = st.columns(3)
 with col1:
-    st.metric("Anzahl Wertpapiere", len(tickers))
+    st.metric("Anzahl Wertpapiere", len(input_list))
 with col2:
     st.metric("Datenquelle", "Yahoo Finance")
 with col3:
@@ -355,10 +174,10 @@ st.divider()
 
 try:
     with st.spinner("Lade Börsendaten..."):
-        df = load_stock_data(tuple(tickers), ticker_isin_map)
+        df = load_stock_data(tuple(input_list))
     
-    # Spalten neu ordnen - ISIN ganz links
-    column_order = ["ISIN", "Name", "1 Woche %", "1 Monat %", "1 Jahr %", 
+    # Spalten neu ordnen - Ticker als erste Spalte
+    column_order = ["Ticker", "Name", "1 Woche %", "1 Monat %", "1 Jahr %", 
                    "5 Jahre %", "5J Tief", "5J Hoch", "5 J. Hoch-Tief %", "Preis"]
     
     df_display = df[column_order].copy()
@@ -377,7 +196,7 @@ try:
     styled_df = df_display.style.map(color_negative_red, subset=pct_columns)
     
     column_config = {
-        "ISIN": st.column_config.TextColumn("ISIN", width="medium"),
+        "Ticker": st.column_config.TextColumn("Ticker", width="small"),
         "Name": st.column_config.TextColumn("Name", width="large"),
         "1 Woche %": st.column_config.NumberColumn("1 Woche %", format="%.2f%%"),
         "1 Monat %": st.column_config.NumberColumn("1 Monat %", format="%.2f%%"),
@@ -409,32 +228,39 @@ try:
         mime="text/csv"
     )
     
-    # Globale Top 15 profitabelste Wertpapiere
-    if show_top15:
+    # Top Performer (feste Liste)
+    if show_top_performers:
         st.divider()
-        st.markdown('<div class="sub-header"><h2>🌍 Globale Top 15 profitabelste Wertpapiere (nach 1 Jahr %)</h2></div>', 
+        st.markdown('<div class="sub-header"><h2>🚀 Top Performer (Wertzuwachs >40% in 1 Jahr)</h2></div>', 
                    unsafe_allow_html=True)
         
-        with st.spinner("Lade globale Top-Performer..."):
-            top15_df = load_global_top_performers()
+        with st.spinner("Lade Top-Performer..."):
+            top_df = load_stock_data(tuple(TOP_PERFORMERS))
         
-        if not top15_df.empty:
+        if not top_df.empty:
+            # Sortieren nach 1 Jahr %
+            top_df_sorted = top_df.nlargest(20, '1 Jahr %')
+            
             # Prüfen welche Ticker in der Haupttabelle sind
             main_tickers = set(df['Ticker'].tolist())
             
-            def highlight_if_in_main(val, row):
+            def highlight_if_in_main(row):
                 if row['Ticker'] in main_tickers:
                     return ['color: #16a34a; font-weight: bold;' if col == 'Name' else '' for col in row.index]
                 return ['' for _ in row.index]
             
-            top15_styled = top15_df.style.map(color_negative_red, subset=['1 Woche %', '1 Monat %', '1 Jahr %', '5 Jahre %'])
-            top15_styled = top15_styled.apply(highlight_if_in_main, axis=1)
+            # Spalten für Top-Performer
+            top_columns = ["Ticker", "Name", "1 Woche %", "1 Monat %", "1 Jahr %", "5 Jahre %", "Preis"]
+            top_df_display = top_df_sorted[top_columns].copy()
+            
+            top_styled = top_df_display.style.map(color_negative_red, subset=['1 Woche %', '1 Monat %', '1 Jahr %', '5 Jahre %'])
+            top_styled = top_styled.apply(highlight_if_in_main, axis=1)
             
             st.dataframe(
-                top15_styled,
+                top_styled,
                 use_container_width=True,
                 column_config={
-                    "ISIN": st.column_config.TextColumn("ISIN", width="medium"),
+                    "Ticker": st.column_config.TextColumn("Ticker", width="small"),
                     "Name": st.column_config.TextColumn("Name", width="large"),
                     "1 Woche %": st.column_config.NumberColumn("1 Woche %", format="%.2f%%"),
                     "1 Monat %": st.column_config.NumberColumn("1 Monat %", format="%.2f%%"),
@@ -448,7 +274,7 @@ try:
             
             st.caption("💡 Grün markierte Namen = auch in deiner Haupttabelle vorhanden")
         else:
-            st.warning("Keine globalen Top-Performer gefunden")
+            st.warning("Keine Top-Performer gefunden")
     
     # Performance-Ranking
     if show_ranking:
@@ -459,7 +285,7 @@ try:
         
         with rank_col1:
             st.markdown("**Top 5 Performer**")
-            top5 = df.nlargest(5, '1 Woche %')[['ISIN', 'Name', '1 Woche %', '1 Jahr %']]
+            top5 = df.nlargest(5, '1 Woche %')[['Ticker', 'Name', '1 Woche %', '1 Jahr %']]
             st.dataframe(
                 top5.style.map(color_negative_red, subset=['1 Woche %', '1 Jahr %']),
                 hide_index=True,
@@ -468,7 +294,7 @@ try:
         
         with rank_col2:
             st.markdown("**Flop 5 Performer**")
-            bottom5 = df.nsmallest(5, '1 Woche %')[['ISIN', 'Name', '1 Woche %', '1 Jahr %']]
+            bottom5 = df.nsmallest(5, '1 Woche %')[['Ticker', 'Name', '1 Woche %', '1 Jahr %']]
             st.dataframe(
                 bottom5.style.map(color_negative_red, subset=['1 Woche %', '1 Jahr %']),
                 hide_index=True,
@@ -486,7 +312,7 @@ st.markdown(
     <div style="text-align: center; color: #666; padding: 1rem;">
         <p>📊 Börsenübersicht | Datenquelle: Yahoo Finance | Erstellt mit Streamlit</p>
         <p>💡 5 J. Hoch-Tief % = ((Hoch - Tief) / Tief) × 100</p>
-        <p>🌍 Globale Top 15 = Die profitabelsten Wertpapiere aus dem gesamten Yahoo Finance Universum</p>
+        <p>🚀 Top Performer = Wertpapiere mit >40% Wertzuwachs in den letzten 12 Monaten</p>
     </div>
     """,
     unsafe_allow_html=True
