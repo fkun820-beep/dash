@@ -65,8 +65,40 @@ KNOWN_ISINS = {
     "US92826C8394": "VTI",
 }
 
-# Ticker zu ISIN Mapping (umgekehrte Zuordnung)
+# Ticker zu ISIN Mapping
 TICKER_TO_ISIN = {v: k for k, v in KNOWN_ISINS.items()}
+
+# Globale Top-Performer abrufen
+@st.cache_data(ttl=3600)
+def get_global_top_performers(limit=15):
+    """Holt die globalen Top-Performer aus Yahoo Finance."""
+    try:
+        # Yahoo Finance Screener API für Top-Performer
+        url = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved"
+        params = {
+            "scrIds": "top_mutual_funds",  # Top Fonds
+            "count": limit,
+            "quoteType": "ETF"
+        }
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        data = response.json()
+        
+        if data.get('finance', {}).get('result'):
+            quotes = data['finance']['result'][0].get('quotes', [])
+            return quotes
+    except:
+        pass
+    
+    # Fallback: Bekannte Top-ETFs und Fonds
+    fallback_tickers = [
+        "SPY", "IVV", "VTI", "VOO", "QQQ",
+        "VUG", "VGT", "XLK", "SMH", "SOXX",
+        "ARKK", "ICLN", "TAN", "URA", "XLE",
+        "XLF", "XLV", "XLY", "XLP", "XLI"
+    ]
+    return fallback_tickers
 
 # Sidebar
 with st.sidebar:
@@ -131,7 +163,7 @@ DE000ETFL508"""
     st.subheader("📊 Anzeigeoptionen")
     show_charts = st.checkbox("Charts anzeigen", value=False)
     show_ranking = st.checkbox("Performance-Ranking", value=True)
-    show_top15 = st.checkbox("Top 15 Fonds anzeigen", value=True)
+    show_top15 = st.checkbox("Globale Top 15 anzeigen", value=True)
     show_debug = st.checkbox("Debug-Informationen", value=False)
     
     st.divider()
@@ -169,7 +201,6 @@ if input_mode == "ISIN-Nummern":
                     conversion_log.append(f"⚠️ {isin} → nicht konvertiert, versuche direkt")
 else:
     tickers = input_list
-    # Für Ticker-Modus: ISIN aus bekannter Liste
     for ticker in tickers:
         if ticker in TICKER_TO_ISIN:
             ticker_isin_map[ticker] = TICKER_TO_ISIN[ticker]
@@ -215,7 +246,6 @@ def load_stock_data(tickers_list, ticker_isin_dict):
                 
                 high_low_diff = ((high_5y - low_5y) / low_5y) * 100 if low_5y > 0 else None
                 
-                # ISIN aus Mapping (hat Priorität)
                 isin = ticker_isin_dict.get(ticker, "")
                 
                 # Fallback: Versuche ISIN von Yahoo zu bekommen
@@ -260,6 +290,57 @@ def load_stock_data(tickers_list, ticker_isin_dict):
             })
     
     return pd.DataFrame(data)
+
+# Globale Top-Performer laden
+@st.cache_data(ttl=3600)
+def load_global_top_performers():
+    """Lädt die globalen Top-Performer mit Performance-Daten."""
+    top_tickers = get_global_top_performers(15)
+    
+    data = []
+    for ticker in top_tickers:
+        try:
+            stock = yf.Ticker(ticker)
+            hist_1y = stock.history(period="1y")
+            
+            if len(hist_1y) > 1:
+                current_price = hist_1y['Close'].iloc[-1]
+                change_1y = (current_price / hist_1y['Close'].iloc[0] - 1) * 100
+                
+                # Weitere Perioden
+                hist_1w = stock.history(period="5d")
+                hist_1mo = stock.history(period="1mo")
+                hist_5y = stock.history(period="5y")
+                
+                change_1w = (current_price / hist_1w['Close'].iloc[0] - 1) * 100 if len(hist_1w) > 1 else None
+                change_1mo = (current_price / hist_1mo['Close'].iloc[0] - 1) * 100 if len(hist_1mo) > 1 else None
+                change_5y = (current_price / hist_5y['Close'].iloc[0] - 1) * 100 if len(hist_5y) > 1 else None
+                
+                isin = ""
+                try:
+                    info = stock.info
+                    if info and 'isin' in info:
+                        isin = info['isin']
+                except:
+                    pass
+                
+                data.append({
+                    "ISIN": isin,
+                    "Name": stock.info.get('longName', ticker)[:40] if stock.info else ticker,
+                    "Ticker": ticker,
+                    "1 Woche %": round(change_1w, 2) if change_1w is not None else None,
+                    "1 Monat %": round(change_1mo, 2) if change_1mo is not None else None,
+                    "1 Jahr %": round(change_1y, 2),
+                    "5 Jahre %": round(change_5y, 2) if change_5y is not None else None,
+                    "Preis": round(current_price, 2)
+                })
+        except:
+            continue
+    
+    df = pd.DataFrame(data)
+    if not df.empty:
+        df = df.nlargest(15, '1 Jahr %')
+    return df
 
 # Hauptbereich
 col1, col2, col3 = st.columns(3)
@@ -328,38 +409,46 @@ try:
         mime="text/csv"
     )
     
-    # Top 15 profitabelste Wertpapiere (nach 1 Jahr %)
+    # Globale Top 15 profitabelste Wertpapiere
     if show_top15:
         st.divider()
-        st.markdown('<div class="sub-header"><h2>🏆 Top 15 profitabelste Wertpapiere (nach 1 Jahr %)</h2></div>', 
+        st.markdown('<div class="sub-header"><h2>🌍 Globale Top 15 profitabelste Wertpapiere (nach 1 Jahr %)</h2></div>', 
                    unsafe_allow_html=True)
         
-        top15 = df.nlargest(15, '1 Jahr %')[['ISIN', 'Name', '1 Woche %', '1 Monat %', '1 Jahr %', '5 Jahre %', 'Preis']]
+        with st.spinner("Lade globale Top-Performer..."):
+            top15_df = load_global_top_performers()
         
-        # Top 15 Namen grün markieren
-        def highlight_top15(val):
-            if isinstance(val, str) and val in top15['Name'].values:
-                return 'color: #16a34a; font-weight: bold;'
-            return ''
-        
-        top15_styled = top15.style.map(color_negative_red, subset=['1 Woche %', '1 Monat %', '1 Jahr %', '5 Jahre %'])
-        top15_styled = top15_styled.map(highlight_top15, subset=['Name'])
-        
-        st.dataframe(
-            top15_styled,
-            use_container_width=True,
-            column_config={
-                "ISIN": st.column_config.TextColumn("ISIN", width="medium"),
-                "Name": st.column_config.TextColumn("Name", width="large"),
-                "1 Woche %": st.column_config.NumberColumn("1 Woche %", format="%.2f%%"),
-                "1 Monat %": st.column_config.NumberColumn("1 Monat %", format="%.2f%%"),
-                "1 Jahr %": st.column_config.NumberColumn("1 Jahr %", format="%.2f%%"),
-                "5 Jahre %": st.column_config.NumberColumn("5 Jahre %", format="%.2f%%"),
-                "Preis": st.column_config.NumberColumn("Preis", format="%.2f")
-            },
-            hide_index=True,
-            height=500
-        )
+        if not top15_df.empty:
+            # Prüfen welche Ticker in der Haupttabelle sind
+            main_tickers = set(df['Ticker'].tolist())
+            
+            def highlight_if_in_main(val, row):
+                if row['Ticker'] in main_tickers:
+                    return ['color: #16a34a; font-weight: bold;' if col == 'Name' else '' for col in row.index]
+                return ['' for _ in row.index]
+            
+            top15_styled = top15_df.style.map(color_negative_red, subset=['1 Woche %', '1 Monat %', '1 Jahr %', '5 Jahre %'])
+            top15_styled = top15_styled.apply(highlight_if_in_main, axis=1)
+            
+            st.dataframe(
+                top15_styled,
+                use_container_width=True,
+                column_config={
+                    "ISIN": st.column_config.TextColumn("ISIN", width="medium"),
+                    "Name": st.column_config.TextColumn("Name", width="large"),
+                    "1 Woche %": st.column_config.NumberColumn("1 Woche %", format="%.2f%%"),
+                    "1 Monat %": st.column_config.NumberColumn("1 Monat %", format="%.2f%%"),
+                    "1 Jahr %": st.column_config.NumberColumn("1 Jahr %", format="%.2f%%"),
+                    "5 Jahre %": st.column_config.NumberColumn("5 Jahre %", format="%.2f%%"),
+                    "Preis": st.column_config.NumberColumn("Preis", format="%.2f")
+                },
+                hide_index=True,
+                height=500
+            )
+            
+            st.caption("💡 Grün markierte Namen = auch in deiner Haupttabelle vorhanden")
+        else:
+            st.warning("Keine globalen Top-Performer gefunden")
     
     # Performance-Ranking
     if show_ranking:
@@ -397,7 +486,7 @@ st.markdown(
     <div style="text-align: center; color: #666; padding: 1rem;">
         <p>📊 Börsenübersicht | Datenquelle: Yahoo Finance | Erstellt mit Streamlit</p>
         <p>💡 5 J. Hoch-Tief % = ((Hoch - Tief) / Tief) × 100</p>
-        <p>💡 In der Top 15 Liste: Grüne Namen = auch in der Haupttabelle vorhanden</p>
+        <p>🌍 Globale Top 15 = Die profitabelsten Wertpapiere aus dem gesamten Yahoo Finance Universum</p>
     </div>
     """,
     unsafe_allow_html=True
