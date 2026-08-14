@@ -47,19 +47,6 @@ def isin_to_ticker(isin):
         pass
     return None
 
-# Ticker zu ISIN Konvertierung
-@st.cache_data(ttl=3600)
-def ticker_to_isin(ticker):
-    """Versucht die ISIN für einen Ticker zu finden."""
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        if info and 'isin' in info:
-            return info['isin']
-    except:
-        pass
-    return ""
-
 # Bekannte ISIN-Zuordnungen
 KNOWN_ISINS = {
     "US0378331005": "AAPL",
@@ -78,7 +65,7 @@ KNOWN_ISINS = {
     "US92826C8394": "VTI",
 }
 
-# Ticker zu ISIN Mapping
+# Ticker zu ISIN Mapping (umgekehrte Zuordnung)
 TICKER_TO_ISIN = {v: k for k, v in KNOWN_ISINS.items()}
 
 # Sidebar
@@ -182,13 +169,14 @@ if input_mode == "ISIN-Nummern":
                     conversion_log.append(f"⚠️ {isin} → nicht konvertiert, versuche direkt")
 else:
     tickers = input_list
-    # Für Ticker-Modus: Versuche ISIN zu finden
+    # Für Ticker-Modus: ISIN aus bekannter Liste
     for ticker in tickers:
-        isin_ticker_map[ticker] = ticker
         if ticker in TICKER_TO_ISIN:
             ticker_isin_map[ticker] = TICKER_TO_ISIN[ticker]
+            isin_ticker_map[ticker] = ticker
         else:
             ticker_isin_map[ticker] = ""
+            isin_ticker_map[ticker] = ticker
 
 # Debug-Anzeige
 if show_debug:
@@ -227,8 +215,10 @@ def load_stock_data(tickers_list, ticker_isin_dict):
                 
                 high_low_diff = ((high_5y - low_5y) / low_5y) * 100 if low_5y > 0 else None
                 
-                # ISIN aus Mapping oder aus Yahoo Info
+                # ISIN aus Mapping (hat Priorität)
                 isin = ticker_isin_dict.get(ticker, "")
+                
+                # Fallback: Versuche ISIN von Yahoo zu bekommen
                 if not isin:
                     try:
                         info = stock.info
@@ -338,14 +328,22 @@ try:
         mime="text/csv"
     )
     
-    # Top 15 profitabelste Fonds (nach 1 Jahr %)
+    # Top 15 profitabelste Wertpapiere (nach 1 Jahr %)
     if show_top15:
         st.divider()
         st.markdown('<div class="sub-header"><h2>🏆 Top 15 profitabelste Wertpapiere (nach 1 Jahr %)</h2></div>', 
                    unsafe_allow_html=True)
         
         top15 = df.nlargest(15, '1 Jahr %')[['ISIN', 'Name', '1 Woche %', '1 Monat %', '1 Jahr %', '5 Jahre %', 'Preis']]
+        
+        # Top 15 Namen grün markieren
+        def highlight_top15(val):
+            if isinstance(val, str) and val in top15['Name'].values:
+                return 'color: #16a34a; font-weight: bold;'
+            return ''
+        
         top15_styled = top15.style.map(color_negative_red, subset=['1 Woche %', '1 Monat %', '1 Jahr %', '5 Jahre %'])
+        top15_styled = top15_styled.map(highlight_top15, subset=['Name'])
         
         st.dataframe(
             top15_styled,
@@ -387,35 +385,6 @@ try:
                 hide_index=True,
                 use_container_width=True
             )
-    
-    # Charts
-    if show_charts:
-        st.divider()
-        st.subheader("📈 Kurschart")
-        
-        chart_col1, chart_col2 = st.columns([1, 3])
-        with chart_col1:
-            selected_name = st.selectbox("Wertpapier:", options=df['Name'].tolist())
-            selected_ticker = df[df['Name'] == selected_name]['Ticker'].iloc[0]
-        with chart_col2:
-            chart_period = st.radio("Zeitraum:", ["1mo", "3mo", "6mo", "1y", "5y"], horizontal=True)
-        
-        try:
-            stock = yf.Ticker(selected_ticker)
-            hist = stock.history(period=chart_period)
-            
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=hist.index, y=hist['Close'], mode='lines', name='Close'))
-            fig.update_layout(
-                title=f"{selected_name} ({selected_ticker}) - {chart_period.upper()}",
-                xaxis_title="Datum",
-                yaxis_title="Preis",
-                height=400,
-                template="plotly_white"
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        except Exception as e:
-            st.error(f"Chart konnte nicht erstellt werden: {e}")
 
 except Exception as e:
     st.error(f"Ein Fehler ist aufgetreten: {str(e)}")
@@ -428,6 +397,7 @@ st.markdown(
     <div style="text-align: center; color: #666; padding: 1rem;">
         <p>📊 Börsenübersicht | Datenquelle: Yahoo Finance | Erstellt mit Streamlit</p>
         <p>💡 5 J. Hoch-Tief % = ((Hoch - Tief) / Tief) × 100</p>
+        <p>💡 In der Top 15 Liste: Grüne Namen = auch in der Haupttabelle vorhanden</p>
     </div>
     """,
     unsafe_allow_html=True
