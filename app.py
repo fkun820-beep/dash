@@ -1,7 +1,12 @@
 import yfinance as yf
 import pandas as pd
 import streamlit as st
-from datetime import datetime, timedelta import plotly.graph_objects as go from plotly.subplots import make_subplots import io
+from datetime 
+import datetime, timedelta 
+import plotly.graph_objects as go 
+from plotly.subplots 
+import make_subplots 
+import io
 
 # Seitenkonfiguration
 st.set_page_config(
