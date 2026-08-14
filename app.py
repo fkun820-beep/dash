@@ -28,7 +28,6 @@ st.markdown('<div class="main-header"><h1>📈 Börsenübersicht</h1><p>Täglich
 @st.cache_data(ttl=3600)
 def isin_to_ticker(isin):
     """Konvertiert ISIN zu Yahoo Finance Ticker mit mehreren Methoden."""
-    # Methode 1: Yahoo Finance Suche
     try:
         url = f"https://query1.finance.yahoo.com/v1/finance/search?q={isin}&quotesCount=5&newsCount=0"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
@@ -36,27 +35,8 @@ def isin_to_ticker(isin):
         data = response.json()
         
         if data.get('quotes'):
-            # Nehme den ersten Treffer
             return data['quotes'][0]['symbol']
     except Exception as e:
-        st.warning(f"Yahoo Suche fehlgeschlagen für {isin}: {e}")
-    
-    # Methode 2: Direkte Umwandlung basierend auf Ländercode
-    try:
-        country_code = isin[:2]
-        
-        # Deutsche ISINs
-        if country_code == "DE":
-            # Versuche verschiedene deutsche Börsen
-            base = isin[2:]
-            # Manchmal funktioniert die direkte Suche
-            return None
-        
-        # US ISINs
-        if country_code == "US":
-            # US ISINs sind oft direkt der Ticker
-            return None
-    except:
         pass
     
     return None
@@ -87,7 +67,7 @@ with st.sidebar:
     input_mode = st.radio(
         "Eingabemodus:",
         ["Ticker-Symbole", "ISIN-Nummern"],
-        help="Wähle zwischen Yahoo-Ticker-Symbolen (z.B. AAPL) oder ISIN-Nummern (z.B. US0378331005)"
+        help="Wähle zwischen Yahoo-Ticker-Symbolen oder ISIN-Nummern"
     )
     
     if input_mode == "Ticker-Symbole":
@@ -110,7 +90,7 @@ BTC-USD
 ETH-USD
 GC=F
 CL=F"""
-        st.info("💡 Tipp: Für deutsche Aktien .DE anhängen (z.B. SIE.DE)")
+        st.info("💡 Tipp: Für deutsche Aktien .DE anhängen")
     else:
         default_input = """US0378331005
 US5949181045
@@ -149,11 +129,13 @@ DE000ETFL508"""
     st.divider()
     st.caption(f"🕐 Letzte Aktualisierung: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
 
-# Ticker-Verarbeitung
-tickers = []
-conversion_log = []
+# ISIN und Ticker Mapping
+isin_ticker_map = {}
 
 if input_mode == "ISIN-Nummern":
+    tickers = []
+    conversion_log = []
+    
     with st.spinner("Konvertiere ISIN zu Ticker..."):
         for isin in input_list:
             isin = isin.strip().upper()
@@ -162,20 +144,25 @@ if input_mode == "ISIN-Nummern":
             if isin in KNOWN_ISINS:
                 ticker = KNOWN_ISINS[isin]
                 tickers.append(ticker)
+                isin_ticker_map[ticker] = isin
                 conversion_log.append(f"✅ {isin} → {ticker} (bekannt)")
             else:
                 # Versuche Konvertierung
                 ticker = isin_to_ticker(isin)
                 if ticker:
                     tickers.append(ticker)
+                    isin_ticker_map[ticker] = isin
                     conversion_log.append(f"✅ {isin} → {ticker}")
                 else:
                     # Fallback: Versuche ISIN direkt
                     tickers.append(isin)
+                    isin_ticker_map[isin] = isin
                     conversion_log.append(f"⚠️ {isin} → nicht konvertiert, versuche direkt")
 else:
     tickers = input_list
-    conversion_log = [f"✅ {t} → {t}" for t in tickers]
+    # Für Ticker-Modus: ISIN leer lassen
+    for ticker in tickers:
+        isin_ticker_map[ticker] = ""
 
 # Debug-Anzeige
 if show_debug and input_mode == "ISIN-Nummern":
@@ -185,7 +172,7 @@ if show_debug and input_mode == "ISIN-Nummern":
 
 # Daten laden
 @st.cache_data(ttl=1800)
-def load_stock_data(tickers_list):
+def load_stock_data(tickers_list, isin_map):
     data = []
     
     for ticker in tickers_list:
@@ -207,17 +194,21 @@ def load_stock_data(tickers_list):
                 change_1y = (current_price / hist_1y['Close'].iloc[0] - 1) * 100 if len(hist_1y) > 1 else None
                 change_5y = (current_price / hist_5y['Close'].iloc[0] - 1) * 100 if len(hist_5y) > 1 else None
                 
-                high_low_diff = ((high_5y - low_5y) / high_5y) * 100 if high_5y > 0 else None
+                # Differenz als Prozent vom Tief: ((Hoch - Tief) / Tief) * 100
+                high_low_diff = ((high_5y - low_5y) / low_5y) * 100 if low_5y > 0 else None
+                
+                isin = isin_map.get(ticker, "")
                 
                 data.append({
                     "Ticker": ticker,
+                    "ISIN": isin,
                     "Name": stock.info.get('longName', ticker)[:40] if stock.info else ticker,
                     "1 Woche %": round(change_1w, 2) if change_1w is not None else None,
                     "1 Monat %": round(change_1mo, 2) if change_1mo is not None else None,
                     "1 Jahr %": round(change_1y, 2) if change_1y is not None else None,
                     "5 Jahre %": round(change_5y, 2) if change_5y is not None else None,
-                    "5J Hoch": round(high_5y, 2),
                     "5J Tief": round(low_5y, 2),
+                    "5J Hoch": round(high_5y, 2),
                     "5 J. Hoch-Tief %": round(high_low_diff, 2) if high_low_diff is not None else None,
                     "Preis": round(current_price, 2)
                 })
@@ -225,15 +216,17 @@ def load_stock_data(tickers_list):
                 raise ValueError(f"Keine Daten für {ticker}")
                 
         except Exception as e:
+            isin = isin_map.get(ticker, "")
             data.append({
                 "Ticker": ticker,
+                "ISIN": isin,
                 "Name": f"❌ {str(e)[:30]}",
                 "1 Woche %": None,
                 "1 Monat %": None,
                 "1 Jahr %": None,
                 "5 Jahre %": None,
-                "5J Hoch": None,
                 "5J Tief": None,
+                "5J Hoch": None,
                 "5 J. Hoch-Tief %": None,
                 "Preis": None
             })
@@ -247,22 +240,20 @@ with col1:
 with col2:
     st.metric("Datenquelle", "Yahoo Finance")
 with col3:
-    erfolgreich = sum(1 for t in tickers if not t.startswith("❌"))
-    st.metric("Erfolgreich geladen", erfolgreich)
+    st.metric("Aktualisierung", "Alle 30 Min")
 
 st.divider()
 
 try:
     with st.spinner("Lade Börsendaten..."):
-        df = load_stock_data(tuple(tickers))
+        df = load_stock_data(tuple(tickers), isin_ticker_map)
     
-    # Spalten neu ordnen
-    column_order = ["Ticker", "Name", "1 Woche %", "1 Monat %", "1 Jahr %", 
-                   "5 Jahre %", "5J Hoch", "5J Tief", "5 J. Hoch-Tief %", "Preis"]
+    # Spalten neu ordnen - Ticker ausblenden, ISIN als zweite Spalte
+    column_order = ["Name", "ISIN", "1 Woche %", "1 Monat %", "1 Jahr %", 
+                   "5 Jahre %", "5J Tief", "5J Hoch", "5 J. Hoch-Tief %", "Preis"]
     
-    # Nur vorhandene Spalten verwenden
-    available_columns = [col for col in column_order if col in df.columns]
-    df = df[available_columns]
+    # Ticker-Spalte entfernen für Anzeige (aber für interne Verwendung behalten)
+    df_display = df[column_order].copy()
     
     # Formatierung
     def color_negative_red(val):
@@ -274,19 +265,18 @@ try:
         return ''
     
     pct_columns = ["1 Woche %", "1 Monat %", "1 Jahr %", "5 Jahre %", "5 J. Hoch-Tief %"]
-    pct_columns = [col for col in pct_columns if col in df.columns]
     
-    styled_df = df.style.map(color_negative_red, subset=pct_columns)
+    styled_df = df_display.style.map(color_negative_red, subset=pct_columns)
     
     column_config = {
-        "Ticker": st.column_config.TextColumn("Ticker", width="small"),
-        "Name": st.column_config.TextColumn("Name", width="medium"),
+        "Name": st.column_config.TextColumn("Name", width="large"),
+        "ISIN": st.column_config.TextColumn("ISIN", width="medium"),
         "1 Woche %": st.column_config.NumberColumn("1 Woche %", format="%.2f%%"),
         "1 Monat %": st.column_config.NumberColumn("1 Monat %", format="%.2f%%"),
         "1 Jahr %": st.column_config.NumberColumn("1 Jahr %", format="%.2f%%"),
         "5 Jahre %": st.column_config.NumberColumn("5 Jahre %", format="%.2f%%"),
-        "5J Hoch": st.column_config.NumberColumn("5J Hoch", format="%.2f"),
         "5J Tief": st.column_config.NumberColumn("5J Tief", format="%.2f"),
+        "5J Hoch": st.column_config.NumberColumn("5J Hoch", format="%.2f"),
         "5 J. Hoch-Tief %": st.column_config.NumberColumn("5 J. Hoch-Tief %", format="%.2f%%"),
         "Preis": st.column_config.NumberColumn("Preis", format="%.2f")
     }
@@ -300,7 +290,7 @@ try:
         height=600
     )
     
-    # CSV Download
+    # CSV Download (mit Ticker für Referenz)
     csv_buffer = io.StringIO()
     df.to_csv(csv_buffer, index=False)
     
@@ -320,7 +310,7 @@ try:
         
         with rank_col1:
             st.markdown("**Top 5 Performer**")
-            top5 = df.nlargest(5, '1 Woche %')[['Ticker', '1 Woche %', '1 Jahr %']]
+            top5 = df.nlargest(5, '1 Woche %')[['Name', 'ISIN', '1 Woche %', '1 Jahr %']]
             st.dataframe(
                 top5.style.map(color_negative_red, subset=['1 Woche %', '1 Jahr %']),
                 hide_index=True,
@@ -329,7 +319,7 @@ try:
         
         with rank_col2:
             st.markdown("**Flop 5 Performer**")
-            bottom5 = df.nsmallest(5, '1 Woche %')[['Ticker', '1 Woche %', '1 Jahr %']]
+            bottom5 = df.nsmallest(5, '1 Woche %')[['Name', 'ISIN', '1 Woche %', '1 Jahr %']]
             st.dataframe(
                 bottom5.style.map(color_negative_red, subset=['1 Woche %', '1 Jahr %']),
                 hide_index=True,
@@ -343,7 +333,8 @@ try:
         
         chart_col1, chart_col2 = st.columns([1, 3])
         with chart_col1:
-            selected_ticker = st.selectbox("Ticker:", options=df['Ticker'].tolist())
+            selected_name = st.selectbox("Wertpapier:", options=df['Name'].tolist())
+            selected_ticker = df[df['Name'] == selected_name]['Ticker'].iloc[0]
         with chart_col2:
             chart_period = st.radio("Zeitraum:", ["1mo", "3mo", "6mo", "1y", "5y"], horizontal=True)
         
@@ -354,7 +345,7 @@ try:
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=hist.index, y=hist['Close'], mode='lines', name='Close'))
             fig.update_layout(
-                title=f"{selected_ticker} - {chart_period.upper()}",
+                title=f"{selected_name} ({selected_ticker}) - {chart_period.upper()}",
                 xaxis_title="Datum",
                 yaxis_title="Preis",
                 height=400,
@@ -366,7 +357,7 @@ try:
 
 except Exception as e:
     st.error(f"Ein Fehler ist aufgetreten: {str(e)}")
-    st.info("Bitte überprüfe deine Eingaben. Ticker-Symbole müssen im Yahoo-Format sein.")
+    st.info("Bitte überprüfe deine Eingaben.")
 
 # Footer
 st.markdown("---")
@@ -374,7 +365,7 @@ st.markdown(
     """
     <div style="text-align: center; color: #666; padding: 1rem;">
         <p>📊 Börsenübersicht | Datenquelle: Yahoo Finance | Erstellt mit Streamlit</p>
-        <p>💡 Tipp: Aktiviere "Debug-Informationen" in der Sidebar, um die ISIN-Konvertierung zu sehen</p>
+        <p>💡 5 J. Hoch-Tief % = ((Hoch - Tief) / Tief) × 100</p>
     </div>
     """,
     unsafe_allow_html=True
