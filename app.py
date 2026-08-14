@@ -19,29 +19,48 @@ st.markdown("""
         border-radius: 10px;
         margin-bottom: 2rem;
     }
+    .sub-header {
+        text-align: center;
+        padding: 0.75rem;
+        background: linear-gradient(90deg, #059669 0%, #10b981 100%);
+        color: white;
+        border-radius: 8px;
+        margin: 1rem 0;
+    }
     </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-header"><h1>📈 Börsenübersicht</h1><p>Tägliche Aktualisierung aller wichtigen Kennzahlen</p></div>', unsafe_allow_html=True)
 
-# Verbesserte ISIN zu Yahoo Ticker Konvertierung
+# ISIN zu Yahoo Ticker Konvertierung
 @st.cache_data(ttl=3600)
 def isin_to_ticker(isin):
-    """Konvertiert ISIN zu Yahoo Finance Ticker mit mehreren Methoden."""
+    """Konvertiert ISIN zu Yahoo Finance Ticker."""
     try:
         url = f"https://query1.finance.yahoo.com/v1/finance/search?q={isin}&quotesCount=5&newsCount=0"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         response = requests.get(url, headers=headers, timeout=10)
         data = response.json()
-        
         if data.get('quotes'):
             return data['quotes'][0]['symbol']
-    except Exception as e:
+    except:
         pass
-    
     return None
 
-# Bekannte ISIN-Zuordnungen als Fallback
+# Ticker zu ISIN Konvertierung
+@st.cache_data(ttl=3600)
+def ticker_to_isin(ticker):
+    """Versucht die ISIN für einen Ticker zu finden."""
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        if info and 'isin' in info:
+            return info['isin']
+    except:
+        pass
+    return ""
+
+# Bekannte ISIN-Zuordnungen
 KNOWN_ISINS = {
     "US0378331005": "AAPL",
     "US5949181045": "MSFT",
@@ -59,11 +78,13 @@ KNOWN_ISINS = {
     "US92826C8394": "VTI",
 }
 
+# Ticker zu ISIN Mapping
+TICKER_TO_ISIN = {v: k for k, v in KNOWN_ISINS.items()}
+
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Einstellungen")
     
-    # Eingabemodus wählen
     input_mode = st.radio(
         "Eingabemodus:",
         ["Ticker-Symbole", "ISIN-Nummern"],
@@ -115,7 +136,6 @@ DE000ETFL508"""
     
     input_list = [x.strip() for x in user_input.split("\n") if x.strip()]
     
-    # Aktualisieren-Button
     if st.button("🔄 Daten aktualisieren", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
@@ -124,6 +144,7 @@ DE000ETFL508"""
     st.subheader("📊 Anzeigeoptionen")
     show_charts = st.checkbox("Charts anzeigen", value=False)
     show_ranking = st.checkbox("Performance-Ranking", value=True)
+    show_top15 = st.checkbox("Top 15 Fonds anzeigen", value=True)
     show_debug = st.checkbox("Debug-Informationen", value=False)
     
     st.divider()
@@ -131,6 +152,7 @@ DE000ETFL508"""
 
 # ISIN und Ticker Mapping
 isin_ticker_map = {}
+ticker_isin_map = {}
 
 if input_mode == "ISIN-Nummern":
     tickers = []
@@ -140,39 +162,48 @@ if input_mode == "ISIN-Nummern":
         for isin in input_list:
             isin = isin.strip().upper()
             
-            # Prüfe ob ISIN in bekannter Liste
             if isin in KNOWN_ISINS:
                 ticker = KNOWN_ISINS[isin]
                 tickers.append(ticker)
                 isin_ticker_map[ticker] = isin
+                ticker_isin_map[ticker] = isin
                 conversion_log.append(f"✅ {isin} → {ticker} (bekannt)")
             else:
-                # Versuche Konvertierung
                 ticker = isin_to_ticker(isin)
                 if ticker:
                     tickers.append(ticker)
                     isin_ticker_map[ticker] = isin
+                    ticker_isin_map[ticker] = isin
                     conversion_log.append(f"✅ {isin} → {ticker}")
                 else:
-                    # Fallback: Versuche ISIN direkt
                     tickers.append(isin)
                     isin_ticker_map[isin] = isin
+                    ticker_isin_map[isin] = isin
                     conversion_log.append(f"⚠️ {isin} → nicht konvertiert, versuche direkt")
 else:
     tickers = input_list
-    # Für Ticker-Modus: ISIN leer lassen
+    # Für Ticker-Modus: Versuche ISIN zu finden
     for ticker in tickers:
-        isin_ticker_map[ticker] = ""
+        isin_ticker_map[ticker] = ticker
+        if ticker in TICKER_TO_ISIN:
+            ticker_isin_map[ticker] = TICKER_TO_ISIN[ticker]
+        else:
+            ticker_isin_map[ticker] = ""
 
 # Debug-Anzeige
-if show_debug and input_mode == "ISIN-Nummern":
-    st.subheader("🔍 Konvertierungsprotokoll")
-    for log in conversion_log:
-        st.text(log)
+if show_debug:
+    st.subheader("🔍 Debug-Informationen")
+    if input_mode == "ISIN-Nummern":
+        for log in conversion_log:
+            st.text(log)
+    else:
+        for ticker in tickers:
+            isin = ticker_isin_map.get(ticker, "Nicht gefunden")
+            st.text(f"{ticker} → ISIN: {isin}")
 
 # Daten laden
 @st.cache_data(ttl=1800)
-def load_stock_data(tickers_list, isin_map):
+def load_stock_data(tickers_list, ticker_isin_dict):
     data = []
     
     for ticker in tickers_list:
@@ -194,15 +225,22 @@ def load_stock_data(tickers_list, isin_map):
                 change_1y = (current_price / hist_1y['Close'].iloc[0] - 1) * 100 if len(hist_1y) > 1 else None
                 change_5y = (current_price / hist_5y['Close'].iloc[0] - 1) * 100 if len(hist_5y) > 1 else None
                 
-                # Differenz als Prozent vom Tief: ((Hoch - Tief) / Tief) * 100
                 high_low_diff = ((high_5y - low_5y) / low_5y) * 100 if low_5y > 0 else None
                 
-                isin = isin_map.get(ticker, "")
+                # ISIN aus Mapping oder aus Yahoo Info
+                isin = ticker_isin_dict.get(ticker, "")
+                if not isin:
+                    try:
+                        info = stock.info
+                        if info and 'isin' in info:
+                            isin = info['isin']
+                    except:
+                        pass
                 
                 data.append({
-                    "Ticker": ticker,
                     "ISIN": isin,
                     "Name": stock.info.get('longName', ticker)[:40] if stock.info else ticker,
+                    "Ticker": ticker,
                     "1 Woche %": round(change_1w, 2) if change_1w is not None else None,
                     "1 Monat %": round(change_1mo, 2) if change_1mo is not None else None,
                     "1 Jahr %": round(change_1y, 2) if change_1y is not None else None,
@@ -216,11 +254,11 @@ def load_stock_data(tickers_list, isin_map):
                 raise ValueError(f"Keine Daten für {ticker}")
                 
         except Exception as e:
-            isin = isin_map.get(ticker, "")
+            isin = ticker_isin_dict.get(ticker, "")
             data.append({
-                "Ticker": ticker,
                 "ISIN": isin,
                 "Name": f"❌ {str(e)[:30]}",
+                "Ticker": ticker,
                 "1 Woche %": None,
                 "1 Monat %": None,
                 "1 Jahr %": None,
@@ -246,13 +284,12 @@ st.divider()
 
 try:
     with st.spinner("Lade Börsendaten..."):
-        df = load_stock_data(tuple(tickers), isin_ticker_map)
+        df = load_stock_data(tuple(tickers), ticker_isin_map)
     
-    # Spalten neu ordnen - Ticker ausblenden, ISIN als zweite Spalte
-    column_order = ["Name", "ISIN", "1 Woche %", "1 Monat %", "1 Jahr %", 
+    # Spalten neu ordnen - ISIN ganz links
+    column_order = ["ISIN", "Name", "1 Woche %", "1 Monat %", "1 Jahr %", 
                    "5 Jahre %", "5J Tief", "5J Hoch", "5 J. Hoch-Tief %", "Preis"]
     
-    # Ticker-Spalte entfernen für Anzeige (aber für interne Verwendung behalten)
     df_display = df[column_order].copy()
     
     # Formatierung
@@ -269,8 +306,8 @@ try:
     styled_df = df_display.style.map(color_negative_red, subset=pct_columns)
     
     column_config = {
-        "Name": st.column_config.TextColumn("Name", width="large"),
         "ISIN": st.column_config.TextColumn("ISIN", width="medium"),
+        "Name": st.column_config.TextColumn("Name", width="large"),
         "1 Woche %": st.column_config.NumberColumn("1 Woche %", format="%.2f%%"),
         "1 Monat %": st.column_config.NumberColumn("1 Monat %", format="%.2f%%"),
         "1 Jahr %": st.column_config.NumberColumn("1 Jahr %", format="%.2f%%"),
@@ -290,7 +327,7 @@ try:
         height=600
     )
     
-    # CSV Download (mit Ticker für Referenz)
+    # CSV Download
     csv_buffer = io.StringIO()
     df.to_csv(csv_buffer, index=False)
     
@@ -301,6 +338,31 @@ try:
         mime="text/csv"
     )
     
+    # Top 15 profitabelste Fonds (nach 1 Jahr %)
+    if show_top15:
+        st.divider()
+        st.markdown('<div class="sub-header"><h2>🏆 Top 15 profitabelste Wertpapiere (nach 1 Jahr %)</h2></div>', 
+                   unsafe_allow_html=True)
+        
+        top15 = df.nlargest(15, '1 Jahr %')[['ISIN', 'Name', '1 Woche %', '1 Monat %', '1 Jahr %', '5 Jahre %', 'Preis']]
+        top15_styled = top15.style.map(color_negative_red, subset=['1 Woche %', '1 Monat %', '1 Jahr %', '5 Jahre %'])
+        
+        st.dataframe(
+            top15_styled,
+            use_container_width=True,
+            column_config={
+                "ISIN": st.column_config.TextColumn("ISIN", width="medium"),
+                "Name": st.column_config.TextColumn("Name", width="large"),
+                "1 Woche %": st.column_config.NumberColumn("1 Woche %", format="%.2f%%"),
+                "1 Monat %": st.column_config.NumberColumn("1 Monat %", format="%.2f%%"),
+                "1 Jahr %": st.column_config.NumberColumn("1 Jahr %", format="%.2f%%"),
+                "5 Jahre %": st.column_config.NumberColumn("5 Jahre %", format="%.2f%%"),
+                "Preis": st.column_config.NumberColumn("Preis", format="%.2f")
+            },
+            hide_index=True,
+            height=500
+        )
+    
     # Performance-Ranking
     if show_ranking:
         st.divider()
@@ -310,7 +372,7 @@ try:
         
         with rank_col1:
             st.markdown("**Top 5 Performer**")
-            top5 = df.nlargest(5, '1 Woche %')[['Name', 'ISIN', '1 Woche %', '1 Jahr %']]
+            top5 = df.nlargest(5, '1 Woche %')[['ISIN', 'Name', '1 Woche %', '1 Jahr %']]
             st.dataframe(
                 top5.style.map(color_negative_red, subset=['1 Woche %', '1 Jahr %']),
                 hide_index=True,
@@ -319,7 +381,7 @@ try:
         
         with rank_col2:
             st.markdown("**Flop 5 Performer**")
-            bottom5 = df.nsmallest(5, '1 Woche %')[['Name', 'ISIN', '1 Woche %', '1 Jahr %']]
+            bottom5 = df.nsmallest(5, '1 Woche %')[['ISIN', 'Name', '1 Woche %', '1 Jahr %']]
             st.dataframe(
                 bottom5.style.map(color_negative_red, subset=['1 Woche %', '1 Jahr %']),
                 hide_index=True,
