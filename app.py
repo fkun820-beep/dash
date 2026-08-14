@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import io
 import requests
 import json
+import plotly.graph_objects as go
 
 st.set_page_config(page_title="Börsenübersicht", page_icon="📈", layout="wide")
 
@@ -239,8 +240,8 @@ try:
     # Prozent-Spalten
     pct_columns = ["1 Woche %", "1 Monat %", "1 Jahr %", "5 Jahre %", "5 J. Hoch-Tief %"]
     
-    # Styling anwenden
-    styled_df = df.style.applymap(color_negative_red, subset=pct_columns)
+    # Styling anwenden (mit .map statt .applymap)
+    styled_df = df.style.map(color_negative_red, subset=pct_columns)
     
     # Spaltenkonfiguration
     column_config = {
@@ -287,7 +288,7 @@ try:
             st.markdown("**Top 5 Performer**")
             top5 = df.nlargest(5, '1 Woche %')[['Ticker', '1 Woche %', '1 Jahr %']]
             st.dataframe(
-                top5.style.applymap(color_negative_red, subset=['1 Woche %', '1 Jahr %']),
+                top5.style.map(color_negative_red, subset=['1 Woche %', '1 Jahr %']),
                 hide_index=True,
                 use_container_width=True
             )
@@ -296,7 +297,7 @@ try:
             st.markdown("**Flop 5 Performer**")
             bottom5 = df.nsmallest(5, '1 Woche %')[['Ticker', '1 Woche %', '1 Jahr %']]
             st.dataframe(
-                bottom5.style.applymap(color_negative_red, subset=['1 Woche %', '1 Jahr %']),
+                bottom5.style.map(color_negative_red, subset=['1 Woche %', '1 Jahr %']),
                 hide_index=True,
                 use_container_width=True
             )
@@ -316,7 +317,6 @@ try:
             stock = yf.Ticker(selected_ticker)
             hist = stock.history(period=chart_period)
             
-            import plotly.graph_objects as go
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=hist.index, y=hist['Close'], mode='lines', name='Close'))
             fig.update_layout(
