@@ -19,33 +19,65 @@ st.markdown("""
         border-radius: 10px;
         margin-bottom: 2rem;
     }
-    .stock-up {
-        color: #16a34a;
-        font-weight: bold;
-    }
-    .stock-down {
-        color: #dc2626;
-        font-weight: bold;
-    }
     </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-header"><h1>📈 Börsenübersicht</h1><p>Tägliche Aktualisierung aller wichtigen Kennzahlen</p></div>', unsafe_allow_html=True)
 
-# ISIN zu Yahoo Ticker Konvertierung
+# Verbesserte ISIN zu Yahoo Ticker Konvertierung
 @st.cache_data(ttl=3600)
 def isin_to_ticker(isin):
-    """Konvertiert ISIN zu Yahoo Finance Ticker."""
+    """Konvertiert ISIN zu Yahoo Finance Ticker mit mehreren Methoden."""
+    # Methode 1: Yahoo Finance Suche
     try:
-        url = f"https://query1.finance.yahoo.com/v1/finance/search?q={isin}&quotesCount=1&newsCount=0"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=5)
+        url = f"https://query1.finance.yahoo.com/v1/finance/search?q={isin}&quotesCount=5&newsCount=0"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(url, headers=headers, timeout=10)
         data = response.json()
+        
         if data.get('quotes'):
+            # Nehme den ersten Treffer
             return data['quotes'][0]['symbol']
+    except Exception as e:
+        st.warning(f"Yahoo Suche fehlgeschlagen für {isin}: {e}")
+    
+    # Methode 2: Direkte Umwandlung basierend auf Ländercode
+    try:
+        country_code = isin[:2]
+        
+        # Deutsche ISINs
+        if country_code == "DE":
+            # Versuche verschiedene deutsche Börsen
+            base = isin[2:]
+            # Manchmal funktioniert die direkte Suche
+            return None
+        
+        # US ISINs
+        if country_code == "US":
+            # US ISINs sind oft direkt der Ticker
+            return None
     except:
         pass
+    
     return None
+
+# Bekannte ISIN-Zuordnungen als Fallback
+KNOWN_ISINS = {
+    "US0378331005": "AAPL",
+    "US5949181045": "MSFT",
+    "US02079K3059": "GOOGL",
+    "US0231351067": "AMZN",
+    "US88160R1014": "TSLA",
+    "DE0008469008": "SIE.DE",
+    "DE0007164600": "SAP.DE",
+    "DE0008404005": "ALV.DE",
+    "IE00B3RBWM25": "VWRL.AS",
+    "IE00B4L5Y983": "IWDA.AS",
+    "DE000A1JXU90": "EQQQ.DE",
+    "DE000ETFL508": "VUSA.DE",
+    "US78462F1030": "SPY",
+    "US92826C8394": "VTI",
+}
 
 # Sidebar
 with st.sidebar:
@@ -91,52 +123,65 @@ DE0008404005
 IE00B3RBWM25
 IE00B4L5Y983
 DE000A1JXU90
-DE000ETFL508
-US78462F1030
-US92826C8394
-US0231351067"""
-        st.info("💡 ISIN-Nummern werden automatisch in Yahoo-Ticker umgewandelt")
+DE000ETFL508"""
+        st.info("💡 ISIN-Nummern werden in Yahoo-Ticker umgewandelt")
     
     user_input = st.text_area(
         "Wertpapiere (eine pro Zeile):",
         value=default_input,
-        height=300
+        height=300,
+        key="input_field"
     )
     
     input_list = [x.strip() for x in user_input.split("\n") if x.strip()]
+    
+    # Aktualisieren-Button
+    if st.button("🔄 Daten aktualisieren", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
     
     st.divider()
     st.subheader("📊 Anzeigeoptionen")
     show_charts = st.checkbox("Charts anzeigen", value=False)
     show_ranking = st.checkbox("Performance-Ranking", value=True)
+    show_debug = st.checkbox("Debug-Informationen", value=False)
     
     st.divider()
     st.caption(f"🕐 Letzte Aktualisierung: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
 
-# ISIN-Konvertierung
+# Ticker-Verarbeitung
+tickers = []
+conversion_log = []
+
 if input_mode == "ISIN-Nummern":
     with st.spinner("Konvertiere ISIN zu Ticker..."):
-        tickers = []
-        isin_mapping = {}
-        progress_bar = st.progress(0)
-        
-        for i, isin in enumerate(input_list):
-            ticker = isin_to_ticker(isin)
-            if ticker:
+        for isin in input_list:
+            isin = isin.strip().upper()
+            
+            # Prüfe ob ISIN in bekannter Liste
+            if isin in KNOWN_ISINS:
+                ticker = KNOWN_ISINS[isin]
                 tickers.append(ticker)
-                isin_mapping[ticker] = isin
+                conversion_log.append(f"✅ {isin} → {ticker} (bekannt)")
             else:
-                tickers.append(isin)  # Falls Konvertierung fehlschlägt, ISIN direkt versuchen
-            progress_bar.progress((i + 1) / len(input_list))
-        
-        progress_bar.empty()
-        
-    if len(isin_mapping) > 0:
-        st.success(f"✅ {len(isin_mapping)} ISIN-Nummern erfolgreich konvertiert")
-        if len(isin_mapping) < len(input_list):
-            st.warning(f"⚠️ {len(input_list) - len(isin_mapping)} ISINs konnten nicht konvertiert werden")
+                # Versuche Konvertierung
+                ticker = isin_to_ticker(isin)
+                if ticker:
+                    tickers.append(ticker)
+                    conversion_log.append(f"✅ {isin} → {ticker}")
+                else:
+                    # Fallback: Versuche ISIN direkt
+                    tickers.append(isin)
+                    conversion_log.append(f"⚠️ {isin} → nicht konvertiert, versuche direkt")
 else:
     tickers = input_list
+    conversion_log = [f"✅ {t} → {t}" for t in tickers]
+
+# Debug-Anzeige
+if show_debug and input_mode == "ISIN-Nummern":
+    st.subheader("🔍 Konvertierungsprotokoll")
+    for log in conversion_log:
+        st.text(log)
 
 # Daten laden
 @st.cache_data(ttl=1800)
@@ -151,25 +196,22 @@ def load_stock_data(tickers_list):
             hist_1mo = stock.history(period="1mo")
             hist_1w = stock.history(period="5d")
             
-            if len(hist_5y) > 0:
+            if len(hist_5y) > 0 and len(hist_1y) > 0:
                 current_price = hist_5y['Close'].iloc[-1]
                 
-                # 5 Jahre Hoch und Tief
                 high_5y = hist_5y['High'].max()
                 low_5y = hist_5y['Low'].min()
                 
-                # Prozentuale Veränderungen
                 change_1w = (current_price / hist_1w['Close'].iloc[0] - 1) * 100 if len(hist_1w) > 1 else None
                 change_1mo = (current_price / hist_1mo['Close'].iloc[0] - 1) * 100 if len(hist_1mo) > 1 else None
                 change_1y = (current_price / hist_1y['Close'].iloc[0] - 1) * 100 if len(hist_1y) > 1 else None
                 change_5y = (current_price / hist_5y['Close'].iloc[0] - 1) * 100 if len(hist_5y) > 1 else None
                 
-                # 5J Hoch-Tief Differenz
                 high_low_diff = ((high_5y - low_5y) / high_5y) * 100 if high_5y > 0 else None
                 
                 data.append({
                     "Ticker": ticker,
-                    "Name": stock.info.get('longName', ticker)[:30],
+                    "Name": stock.info.get('longName', ticker)[:40] if stock.info else ticker,
                     "1 Woche %": round(change_1w, 2) if change_1w is not None else None,
                     "1 Monat %": round(change_1mo, 2) if change_1mo is not None else None,
                     "1 Jahr %": round(change_1y, 2) if change_1y is not None else None,
@@ -180,22 +222,12 @@ def load_stock_data(tickers_list):
                     "Preis": round(current_price, 2)
                 })
             else:
-                data.append({
-                    "Ticker": ticker,
-                    "Name": ticker,
-                    "1 Woche %": None,
-                    "1 Monat %": None,
-                    "1 Jahr %": None,
-                    "5 Jahre %": None,
-                    "5J Hoch": None,
-                    "5J Tief": None,
-                    "5 J. Hoch-Tief %": None,
-                    "Preis": None
-                })
+                raise ValueError(f"Keine Daten für {ticker}")
+                
         except Exception as e:
             data.append({
                 "Ticker": ticker,
-                "Name": f"Fehler: {str(e)[:20]}",
+                "Name": f"❌ {str(e)[:30]}",
                 "1 Woche %": None,
                 "1 Monat %": None,
                 "1 Jahr %": None,
@@ -215,7 +247,8 @@ with col1:
 with col2:
     st.metric("Datenquelle", "Yahoo Finance")
 with col3:
-    st.metric("Aktualisierung", "Alle 30 Min")
+    erfolgreich = sum(1 for t in tickers if not t.startswith("❌"))
+    st.metric("Erfolgreich geladen", erfolgreich)
 
 st.divider()
 
@@ -223,10 +256,13 @@ try:
     with st.spinner("Lade Börsendaten..."):
         df = load_stock_data(tuple(tickers))
     
-    # Spalten neu ordnen - Preis nach ganz rechts
+    # Spalten neu ordnen
     column_order = ["Ticker", "Name", "1 Woche %", "1 Monat %", "1 Jahr %", 
                    "5 Jahre %", "5J Hoch", "5J Tief", "5 J. Hoch-Tief %", "Preis"]
-    df = df[column_order]
+    
+    # Nur vorhandene Spalten verwenden
+    available_columns = [col for col in column_order if col in df.columns]
+    df = df[available_columns]
     
     # Formatierung
     def color_negative_red(val):
@@ -237,13 +273,11 @@ try:
                 return 'color: #16a34a; font-weight: bold;'
         return ''
     
-    # Prozent-Spalten
     pct_columns = ["1 Woche %", "1 Monat %", "1 Jahr %", "5 Jahre %", "5 J. Hoch-Tief %"]
+    pct_columns = [col for col in pct_columns if col in df.columns]
     
-    # Styling anwenden (mit .map statt .applymap)
     styled_df = df.style.map(color_negative_red, subset=pct_columns)
     
-    # Spaltenkonfiguration
     column_config = {
         "Ticker": st.column_config.TextColumn("Ticker", width="small"),
         "Name": st.column_config.TextColumn("Name", width="medium"),
@@ -340,7 +374,7 @@ st.markdown(
     """
     <div style="text-align: center; color: #666; padding: 1rem;">
         <p>📊 Börsenübersicht | Datenquelle: Yahoo Finance | Erstellt mit Streamlit</p>
-        <p>💡 Tipp: Du kannst sowohl Ticker-Symbole als auch ISIN-Nummern verwenden</p>
+        <p>💡 Tipp: Aktiviere "Debug-Informationen" in der Sidebar, um die ISIN-Konvertierung zu sehen</p>
     </div>
     """,
     unsafe_allow_html=True
