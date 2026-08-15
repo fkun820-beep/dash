@@ -43,6 +43,69 @@ st.markdown("""
 
 st.markdown('<div class="main-header"><h1>📈 Börsenübersicht</h1><p>Tägliche Aktualisierung aller wichtigen Kennzahlen</p></div>', unsafe_allow_html=True)
 
+# ISIN zu Yahoo Ticker Konvertierung
+@st.cache_data(ttl=3600)
+def isin_to_ticker(isin):
+    """Konvertiert ISIN zu Yahoo Finance Ticker."""
+    # Bekannte ISIN-Zuordnungen
+    KNOWN_ISINS = {
+        "LU0203975197": "0P0000WLAC.F",  # Fidelity Funds - Global Dividend Fund
+        "LU0757431068": "0P0000Y4BX.F",  # Fidelity Funds - Global Technology Fund
+        "FR0010315770": "0P0000X5Z3.F",  # Fidelity Funds - France Fund
+        "LU0274211480": "0P0000QA1J.F",  # Fidelity Funds - Global Focus Fund
+        "IE00B1D7YP71": "0P0000WLUY.F",  # Fidelity Funds - Global Dividend Fund
+        "IE00B8GKDB10": "0P0000WLUZ.F",  # Fidelity Funds - Global Technology Fund
+        "LU0411078552": "0P0000QA1K.F",  # Fidelity Funds - Global Focus Fund
+        "LU1900066033": "0P0000WLVA.F",  # Fidelity Funds - Global Dividend Fund
+        "FR0010930644": "0P0000X5Z4.F",  # Fidelity Funds - France Fund
+        "DE000A0F5UJ7": "0P0000WLVD.F",  # Fidelity Funds - Global Dividend Fund
+        "US5324571083": "LLY",  # Eli Lilly
+        "US0404132054": "ARWR",  # Arrowhead Pharmaceuticals
+        "US67066G1040": "NVDA",  # NVIDIA
+    }
+    
+    if isin in KNOWN_ISINS:
+        return KNOWN_ISINS[isin]
+    
+    # Versuche Yahoo Finance Suche
+    try:
+        url = f"https://query1.finance.yahoo.com/v1/finance/search?q={isin}&quotesCount=5&newsCount=0"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(url, headers=headers, timeout=10)
+        data = response.json()
+        if data.get('quotes'):
+            return data['quotes'][0]['symbol']
+    except:
+        pass
+    
+    return None
+
+# Feste Wertpapierliste (ISIN-Nummern)
+DEFAULT_ISINS = [
+    "LU0203975197",  # Fidelity Funds - Global Dividend Fund
+    "LU0757431068",  # Fidelity Funds - Global Technology Fund
+    "FR0010315770",  # Fidelity Funds - France Fund
+    "LU0274211480",  # Fidelity Funds - Global Focus Fund
+    "IE00B1D7YP71",  # Fidelity Funds - Global Dividend Fund
+    "IE00B8GKDB10",  # Fidelity Funds - Global Technology Fund
+    "LU0411078552",  # Fidelity Funds - Global Focus Fund
+    "LU1900066033",  # Fidelity Funds - Global Dividend Fund
+    "FR0010930644",  # Fidelity Funds - France Fund
+    "DE000A0F5UJ7",  # Fidelity Funds - Global Dividend Fund
+    "US5324571083",  # Eli Lilly
+    "US0404132054",  # Arrowhead Pharmaceuticals
+    "US67066G1040",  # NVIDIA
+    "^GDAXI",  # DAX
+]
+
+# Feste Top-Performer-Liste
+TOP_PERFORMERS = [
+    "NVDA", "MSTR", "PLTR", "COIN", "SMCI",
+    "AMD", "AVGO", "TSLA", "META", "CRWD",
+    "HOOD", "APP", "VRT", "ARM", "LLY",
+    "DDOG", "NET", "SHOP", "UBER", "ANET"
+]
+
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Einstellungen")
@@ -59,36 +122,22 @@ with st.sidebar:
     
     st.divider()
     
-    default_input = """AAPL
-MSFT
-GOOGL
-AMZN
-TSLA
-^GDAXI
-^GSPC
-^IXIC
-VWRL.AS
-IWDA.AS
-EQQQ.DE
-VUSA.AS
-SIE.DE
-SAP.DE
-ALV.DE
-BTC-USD
-ETH-USD
-GC=F
-CL=F"""
+    st.info("💡 Die feste Wertpapierliste ist im Programm integriert")
     
-    st.info("💡 Tipp: Für deutsche Aktien .DE anhängen")
-    
-    user_input = st.text_area(
-        "Wertpapiere (eine pro Zeile):",
-        value=default_input,
-        height=300,
-        key="input_field"
+    # Optionale zusätzliche Ticker
+    additional_input = st.text_area(
+        "Zusätzliche Wertpapiere (optional, eine pro Zeile):",
+        value="",
+        height=150,
+        key="additional_input",
+        help="Hier kannst du zusätzliche Ticker oder ISIN-Nummern eingeben"
     )
     
-    input_list = [x.strip() for x in user_input.split("\n") if x.strip()]
+    # Kombiniere feste Liste mit zusätzlichen Eingaben
+    all_inputs = DEFAULT_ISINS.copy()
+    if additional_input.strip():
+        additional_list = [x.strip() for x in additional_input.split("\n") if x.strip()]
+        all_inputs.extend(additional_list)
     
     if st.button("🔄 Daten aktualisieren", use_container_width=True):
         st.cache_data.clear()
@@ -104,13 +153,31 @@ CL=F"""
     st.caption(f"🕐 Letzte Aktualisierung: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
     st.caption(f"⭐ Markierte Wertpapiere: {len(st.session_state.marked_securities)}")
 
-# Feste Top-Performer-Liste
-TOP_PERFORMERS = [
-    "NVDA", "MSTR", "PLTR", "COIN", "SMCI",
-    "AMD", "AVGO", "TSLA", "META", "CRWD",
-    "HOOD", "APP", "VRT", "ARM", "LLY",
-    "DDOG", "NET", "SHOP", "UBER", "ANET"
-]
+# ISIN zu Ticker Konvertierung für die Hauptliste
+tickers = []
+conversion_log = []
+
+with st.spinner("Konvertiere ISIN zu Ticker..."):
+    for item in all_inputs:
+        item = item.strip()
+        if not item:
+            continue
+            
+        # Prüfe ob es ein direkter Ticker ist (nicht ISIN)
+        if item.startswith("^") or "." in item or not item[:2].isalpha() or not item[2:].isdigit():
+            # Ist bereits ein Ticker
+            tickers.append(item)
+            conversion_log.append(f"✅ {item} → {item} (direkter Ticker)")
+        else:
+            # Ist eine ISIN
+            ticker = isin_to_ticker(item)
+            if ticker:
+                tickers.append(ticker)
+                conversion_log.append(f"✅ {item} → {ticker}")
+            else:
+                # Fallback: Versuche ISIN direkt
+                tickers.append(item)
+                conversion_log.append(f"⚠️ {item} → nicht konvertiert, versuche direkt")
 
 # Daten laden
 @st.cache_data(ttl=1800)
@@ -138,7 +205,6 @@ def load_stock_data(tickers_list):
                 
                 high_low_diff = ((high_5y - low_5y) / low_5y) * 100 if low_5y > 0 else None
                 
-                # Yahoo Finance Link
                 yahoo_link = f"https://finance.yahoo.com/quote/{ticker}"
                 
                 data.append({
@@ -192,7 +258,6 @@ if st.session_state.show_marked_only:
         with st.spinner("Lade markierte Wertpapiere..."):
             marked_df = load_stock_data(tuple(st.session_state.marked_securities))
         
-        # Tabelle anzeigen
         column_order = ["Ticker", "Name", "1 Woche %", "1 Monat %", "1 Jahr %", 
                        "5 Jahre %", "5J Tief", "5J Hoch", "5 J. Hoch-Tief %", "Preis"]
         
@@ -222,12 +287,10 @@ if st.session_state.show_marked_only:
             height=600
         )
         
-        # Links zu Yahoo Finance
         st.subheader("🔗 Yahoo Finance Links")
         for _, row in marked_df.iterrows():
             st.markdown(f"[{row['Ticker']} - {row['Name']}]({row['Link']})")
         
-        # CSV Download
         csv_buffer = io.StringIO()
         marked_df.to_csv(csv_buffer, index=False)
         st.download_button(
@@ -237,7 +300,6 @@ if st.session_state.show_marked_only:
             mime="text/csv"
         )
         
-        # Markierungen löschen
         if st.button("🗑️ Alle Markierungen löschen", use_container_width=True):
             st.session_state.marked_securities.clear()
             st.rerun()
@@ -249,7 +311,7 @@ else:
     # Hauptansicht
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Anzahl Wertpapiere", len(input_list))
+        st.metric("Anzahl Wertpapiere", len(tickers))
     with col2:
         st.metric("Datenquelle", "Yahoo Finance")
     with col3:
@@ -259,9 +321,8 @@ else:
 
     try:
         with st.spinner("Lade Börsendaten..."):
-            df = load_stock_data(tuple(input_list))
+            df = load_stock_data(tuple(tickers))
         
-        # Spalten neu ordnen
         column_order = ["Ticker", "Name", "1 Woche %", "1 Monat %", "1 Jahr %", 
                        "5 Jahre %", "5J Tief", "5J Hoch", "5 J. Hoch-Tief %", "Preis"]
         
@@ -310,7 +371,6 @@ else:
             with col4:
                 st.markdown(f"[Yahoo Finance 🔗]({row['Link']})")
         
-        # CSV Download
         csv_buffer = io.StringIO()
         df.to_csv(csv_buffer, index=False)
         
@@ -364,7 +424,6 @@ else:
                 
                 st.caption("💡 Grün markierte Namen = auch in deiner Haupttabelle vorhanden")
                 
-                # Checkboxen für Top Performer
                 st.subheader("⭐ Top Performer markieren")
                 for _, row in top_df_sorted.iterrows():
                     col1, col2, col3, col4 = st.columns([0.1, 0.15, 0.45, 0.3])
